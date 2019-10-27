@@ -2,6 +2,7 @@ import React from "react";
 import "./Recorder.css";
 import createPlotlyComponent from "react-plotly.js/factory";
 
+const AudioContext = window.AudioContext || window.webkitAudioContext;
 const Plotly = window.Plotly;
 const Plot = createPlotlyComponent(Plotly);
 
@@ -35,6 +36,12 @@ class Recorder extends React.Component {
     ][0].text;
     this.state.buttonStartVisible = true;
     this.state.buttonStopVisible = false;
+    // recorder helpers
+    this.mediaRecorder = null;
+    this.audioContext = null;
+    this.audioContextSource = null;
+    this.analyser = null;
+    this.frameIntervalTask = null;
   }
 
   // ***********************************************************************
@@ -55,7 +62,7 @@ class Recorder extends React.Component {
     navigator.mediaDevices
       .getUserMedia({ audio: true, video: false })
       .then(this.startRecording)
-      .catch(error => alert("Could not start recording:", error.message));
+      .catch(error => alert("Could not start recording: " + error.message));
   };
 
   onStop = () => {
@@ -63,59 +70,102 @@ class Recorder extends React.Component {
   };
 
   startRecording = stream => {
-    // console.log("start recording...");
+    console.log("Start recording...");
+    if (this.frameIntervalTask != null) {
+      console.warn("Recording was already started.");
+      return;
+    }
     this.setState({
       recording: true,
       recordingShouldStop: false,
       recordingStopped: false
     });
 
+    // create media recorder to get audio input in webm format
     // see https://developers.google.com/web/fundamentals/media/recording-audio
     const options = { mimeType: "audio/webm" };
     const recordedChunks = [];
-    const mediaRecorder = new MediaRecorder(stream, options);
+    this.mediaRecorder = new MediaRecorder(stream, options);
+    // create audio context
+    this.audioContext = new AudioContext();
+    this.audioContextSource = this.audioContext.createMediaStreamSource(stream);
+    // create analyser node to get frequency and time-domain data
+    // see https://developer.mozilla.org/en-US/docs/Web/API/AnalyserNode
+    this.analyser = this.audioContext.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.audioContextSource.connect(this.analyser);
+    const bufferLength = this.analyser.frequencyBinCount;
+    const sampleRateHz = 44100;
+    const timeDomainData = [];
+    const frequenciesData = [];
 
-    // console.log("media recorder created.");
-    var recorderComponent = this;
+    // grab state, to use it in child functions
+    var parentComponent = this;
 
-    mediaRecorder.addEventListener("dataavailable", function(e) {
-      // console.log("dataavailable", e);
-      if (e.data.size > 0) {
-        recordedChunks.push(e.data);
-      }
+    // start collecting numerical signal, at a frequency defined by sampleRateHz
+    this.frameIntervalTask = setInterval(function() {
+      console.log("--> collecting samples...");
+      var timeDomainDataArray = new Float32Array(bufferLength);
+      var frequenciesDataArray = new Float32Array(bufferLength);
+      parentComponent.analyser.getFloatTimeDomainData(timeDomainDataArray);
+      parentComponent.analyser.getFloatFrequencyData(frequenciesDataArray);
       if (
-        recorderComponent.state.recordingShouldStop === true &&
-        recorderComponent.state.recordingStopped === false
+        timeDomainDataArray[0] === -Infinity ||
+        frequenciesDataArray[0] === -Infinity
       ) {
-        mediaRecorder.stop();
-        recorderComponent.setState({ recordingStopped: true });
+        // don't record empty signals
+        return;
+      }
+      timeDomainData.push(timeDomainDataArray);
+      frequenciesData.push(frequenciesDataArray);
+    }, (this.analyser.fftSize / sampleRateHz) * 1000);
+
+    this.mediaRecorder.addEventListener("dataavailable", function(e) {
+      console.log(">> data available");
+      if (e.data.size > 0 && !parentComponent.state.recordingStopped) {
+        recordedChunks.push(e.data);
       }
     });
 
-    mediaRecorder.addEventListener("stop", function() {
-      // console.log("stopped recording. creating new blob...");
-      const blob = new Blob(recordedChunks);
-      // const blob = new Blob(recordedChunks, { type: "audio/wav; codecs=0" });
-      var newRecords = [...recorderComponent.state.records];
+    this.mediaRecorder.addEventListener("stop", function() {
+      console.log("stopped recording. creating new blob...");
+      // const blob = new Blob(recordedChunks);
+      const blob = new Blob(recordedChunks, { type: "audio/wav; codecs=0" });
+      const blobUrl = URL.createObjectURL(blob);
+      var newRecords = [...parentComponent.state.records];
+      //
+
+      //window.RhomeDataSample = [timeDomainDataArray, frequenciesDataArray];
+      console.log("dataArrays", window.RhomeDataSample);
+      console.log("---------------------------------------");
       var newRecord = {
-        category: recorderComponent.state.selectedCategory,
-        value: recorderComponent.state.selectedValue,
+        category: parentComponent.state.selectedCategory,
+        value: parentComponent.state.selectedValue,
         blob: blob,
-        url: URL.createObjectURL(blob)
+        url: blobUrl,
+        timeDomainData: timeDomainData,
+        frequenciesData: frequenciesData
       };
       console.log("new record=", newRecord);
       // add to collected records
       newRecords.push(newRecord);
-      recorderComponent.setState({ records: newRecords });
+      parentComponent.setState({ records: newRecords });
     });
 
-    mediaRecorder.start();
+    this.mediaRecorder.start(200);
   };
 
   stopRecording = () => {
-    // console.log("stopRecording clicked");
+    console.log("stopRecording clicked");
+
+    clearInterval(this.frameIntervalTask); // stop collection of numerical data
+    this.frameIntervalTask = null;
+    this.mediaRecorder.stop();
+    this.analyser.disconnect();
+    this.audioContext.close();
+
     this.setState({
-      recordingShouldStop: true,
+      recordingStopped: true,
       buttonStartVisible: true,
       buttonStopVisible: false
     });
@@ -141,6 +191,18 @@ class Recorder extends React.Component {
   // ***********************************************************************
 
   displayRecord(record, id) {
+    var zValues = [];
+    const numFrequencies = record.frequenciesData[0].length;
+    const numTimeSteps = record.frequenciesData.length;
+    for (var f = 0; f < numFrequencies; f++) {
+      // 1 row per frequency
+      var timeValues = [];
+      // 1 col per time step
+      for (var t = 0; t < numTimeSteps; t++) {
+        timeValues.push(record.frequenciesData[t][f]);
+      }
+      zValues.push(timeValues);
+    }
     return (
       <div key={id} className="record-container">
         <div className="record-item">
@@ -150,11 +212,11 @@ class Recorder extends React.Component {
           <audio src={record.url} controls></audio>
         </div>
         <div className="record-item">
-          <Plot
+          {/* <Plot
             data={[
               {
-                x: Array.from(Array(200).keys()).map(x => 0.05 * x),
-                y: Array.from(Array(200).keys()).map(x => Math.cos(0.05 * x)),
+                x: record.frequenciesData[0].keys(),
+                y: record.frequenciesData[0],
                 type: "scatter",
                 mode: "lines"
               }
@@ -165,6 +227,28 @@ class Recorder extends React.Component {
               title: "Signal amplitude",
               plot_bgcolor: "black",
               paper_bgcolor: "black"
+            }}
+          /> */}
+          <Plot
+            data={[
+              {
+                z: zValues,
+                type: "heatmap",
+                colorscale: "Viridis"
+              }
+            ]}
+            layout={{
+              width: "100%",
+              height: "100%",
+              title: "FFT Spectogram (decibels)",
+              plot_bgcolor: "black",
+              paper_bgcolor: "black",
+              xaxis: {
+                title: { text: "Time step" }
+              },
+              yaxis: {
+                title: { text: "Frequency bucket" }
+              }
             }}
           />
         </div>
