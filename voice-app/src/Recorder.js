@@ -63,6 +63,7 @@ class Recorder extends React.Component {
   };
 
   startRecording = stream => {
+    // console.log("start recording...");
     this.setState({
       recording: true,
       recordingShouldStop: false,
@@ -74,9 +75,11 @@ class Recorder extends React.Component {
     const recordedChunks = [];
     const mediaRecorder = new MediaRecorder(stream, options);
 
+    // console.log("media recorder created.");
     var recorderComponent = this;
 
     mediaRecorder.addEventListener("dataavailable", function(e) {
+      // console.log("dataavailable", e);
       if (e.data.size > 0) {
         recordedChunks.push(e.data);
       }
@@ -90,7 +93,9 @@ class Recorder extends React.Component {
     });
 
     mediaRecorder.addEventListener("stop", function() {
+      // console.log("stopped recording. creating new blob...");
       const blob = new Blob(recordedChunks);
+      // const blob = new Blob(recordedChunks, { type: "audio/wav; codecs=0" });
       var newRecords = [...recorderComponent.state.records];
       var newRecord = {
         category: recorderComponent.state.selectedCategory,
@@ -104,10 +109,11 @@ class Recorder extends React.Component {
       recorderComponent.setState({ records: newRecords });
     });
 
-    mediaRecorder.start(200);
+    mediaRecorder.start();
   };
 
   stopRecording = () => {
+    // console.log("stopRecording clicked");
     this.setState({
       recordingShouldStop: true,
       buttonStartVisible: true,
