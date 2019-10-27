@@ -192,8 +192,9 @@ class Recorder extends React.Component {
 
   displayRecord(record, id) {
     var zValues = [];
-    const numFrequencies = record.frequenciesData[0].length;
     const numTimeSteps = record.frequenciesData.length;
+    if (numTimeSteps === 0) return;
+    const numFrequencies = record.frequenciesData[0].length;
     for (var f = 0; f < numFrequencies; f++) {
       // 1 row per frequency
       var timeValues = [];
