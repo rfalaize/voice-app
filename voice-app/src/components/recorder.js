@@ -2,6 +2,7 @@ import React from "react";
 import "./recorder.css";
 import createPlotlyComponent from "react-plotly.js/factory";
 import AudioStoreApi from "../api/audioStoreApi";
+import ClipLoader from "react-spinners/ClipLoader";
 
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 const Plotly = window.Plotly;
@@ -33,6 +34,7 @@ class Recorder extends React.Component {
         this.state.userEmailAddress = null;
         this.state.apiPwd = null;
         // save/delete
+        this.state.loading = false;
         this.state.recordSaved = null;
         // recorder helpers
         this.mediaRecorder = null;
@@ -181,9 +183,10 @@ class Recorder extends React.Component {
             alert("Please enter a user name, a valid email address, and the API password.");
             return;
         }
+        this.setState({ loading: true });
         this.audioStoreApi.saveRecord(this.state.userName, this.state.userEmailAddress, record, this.state.apiPwd).then(resp => {
             console.log(resp);
-            this.setState({ recordSaved: resp });
+            this.setState({ recordSaved: resp, loading: false });
         });
     };
 
@@ -191,13 +194,14 @@ class Recorder extends React.Component {
         if (this.state.recordSaved == null) return;
         if (this.state.recordSaved.status === false) return;
         console.log("deleting record", this.state.recordSaved.id);
+        this.setState({ loading: true });
         this.audioStoreApi.deleteRecord(this.state.recordSaved.id, this.state.apiPwd).then(resp => {
             console.log(resp);
             if (resp.success !== true) {
                 alert("An error occurred while deleting record: " + resp.errorMessage);
                 return;
             }
-            this.setState({ record: null, recordSaved: null });
+            this.setState({ record: null, recordSaved: null, loading: false });
         });
     };
 
@@ -216,6 +220,9 @@ class Recorder extends React.Component {
     };
 
     displaySaveStatus = () => {
+        if (this.state.loading) {
+            return <ClipLoader sizeUnit={"px"} size={35} color={"#26c281"} loading={this.state.loading} />;
+        }
         if (this.state.recordSaved == null) return;
         if (this.state.recordSaved.success) {
             return (
