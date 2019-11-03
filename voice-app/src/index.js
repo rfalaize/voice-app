@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom";
-import Recorder from "./Recorder";
+import Recorder from "./components/recorder";
 import * as serviceWorker from "./serviceWorker";
 
 ReactDOM.render(<Recorder />, document.getElementById("root"));
